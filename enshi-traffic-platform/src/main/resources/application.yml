@@ -1,0 +1,78 @@
+# 服务器配置
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+# Spring配置
+spring:
+  # 应用信息
+  application:
+    name: enshi-traffic-platform
+
+  # 数据源配置
+  datasource:
+    url: jdbc:mysql://localhost:3308/enshistraffic?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8
+    username: root  # 使用前面创建的用户，或root
+    password: 123456 # 替换为实际密码
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      idle-timeout: 30000
+      connection-timeout: 30000
+
+  # JPA配置
+  jpa:
+    hibernate:
+      ddl-auto: update  # 开发环境使用update，生产环境应改为none或validate
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        format_sql: true
+
+  # Jackson JSON配置
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+    serialization:
+      write-dates-as-timestamps: false
+
+# 日志配置
+logging:
+  level:
+    root: INFO
+    com.example.enshitrafficplatform: DEBUG
+    org.hibernate.SQL: DEBUG
+    # 生产环境应调整为更高级别
+  file:
+    name: logs/enshi-traffic-platform.log
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+# SpringDoc OpenAPI配置
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+  packages-to-scan: com.example.enshitrafficplatform.controller
+
+# 应用自定义配置
+app:
+  # 高德地图API配置
+  amap:
+    key: 您的高德地图API密钥
+    traffic-url: https://restapi.amap.com/v3/traffic/status/road
+  # 天气API配置（未来扩展）
+  weather:
+    api-key: 您的天气API密钥
+    api-url: https://weatherapi.com/api
+  # 定时任务配置
+  scheduler:
+    enabled: true
+    traffic-update-cron: "0 */10 * * * *"  # 每10分钟更新一次交通数据
+    weather-update-cron: "0 0 */1 * * *"   # 每小时更新一次天气数据
