@@ -123,7 +123,14 @@ public class PeakPeriodRule {
     private Region region;
 
     /**
-     * 所属路段集合
+     * 所属路段
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "road_section_id")
+    private RoadSection roadSection;
+
+    /**
+     * 所属路段集合（多对多关系）
      */
     @ManyToMany
     @JoinTable(
