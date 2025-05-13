@@ -3,6 +3,7 @@ package com.example.enshitrafficplatform.entity;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -11,6 +12,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -19,7 +21,12 @@ import java.util.stream.Collectors;
  * 表示道路的具体路段，一条道路可以分为多个路段
  */
 @Entity
-@Table(name = "road_sections")
+@Table(name = "road_sections", indexes = {
+    @Index(name = "idx_road_section_name", columnList = "name"),
+    @Index(name = "idx_road_section_type", columnList = "type"),
+    @Index(name = "idx_road_section_road", columnList = "road_id"),
+    @Index(name = "idx_road_section_risk", columnList = "risk_level")
+})
 @Data
 @Builder
 @NoArgsConstructor
@@ -45,6 +52,7 @@ public class RoadSection {
      * 路段长度，单位：公里
      */
     @NotNull(message = "路段长度不能为空")
+    @Positive(message = "路段长度必须为正数")
     @Column(name = "length", nullable = false)
     private Double length;
 
@@ -159,6 +167,7 @@ public class RoadSection {
     /**
      * 所属道路
      */
+    @NotNull(message = "所属道路不能为空")
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "road_id", nullable = false)
     private Road road;
@@ -447,5 +456,273 @@ public class RoadSection {
             return (startLatitude + endLatitude) / 2;
         }
         return null;
+    }
+
+    /**
+     * 计算当前路段的拥堵指数
+     * 0-10：0表示畅通，10表示严重拥堵
+     * @return 拥堵指数
+     */
+    public Double getCurrentCongestionIndex() {
+        Integer currentFlow = getCurrentTrafficFlow();
+        Integer capacity = evaluateActualCapacity();
+        
+        if (currentFlow == null || capacity == null || capacity == 0) {
+            return null;
+        }
+        
+        // 计算饱和度
+        double saturation = (double) currentFlow / capacity;
+        
+        // 基于饱和度计算拥堵指数
+        if (saturation < 0.5) {
+            // 畅通
+            return saturation * 2; // 0-1范围
+        } else if (saturation < 0.8) {
+            // 轻度拥堵
+            return 1.0 + (saturation - 0.5) * (4.0 / 0.3); // 1-5范围
+        } else if (saturation < 1.0) {
+            // 中度拥堵
+            return 5.0 + (saturation - 0.8) * (2.0 / 0.2); // 5-7范围
+        } else {
+            // 重度拥堵
+            return Math.min(7.0 + (saturation - 1.0) * 3.0, 10.0); // 7-10范围，最大10
+        }
+    }
+    
+    /**
+     * 获取路段拥堵状态描述
+     * @return 拥堵状态描述：畅通、轻微拥堵、中度拥堵、严重拥堵
+     */
+    public String getCongestionStatus() {
+        Double congestionIndex = getCurrentCongestionIndex();
+        
+        if (congestionIndex == null) {
+            return "数据不足";
+        }
+        
+        if (congestionIndex < 2.0) {
+            return "畅通";
+        } else if (congestionIndex < 5.0) {
+            return "轻微拥堵";
+        } else if (congestionIndex < 7.0) {
+            return "中度拥堵";
+        } else {
+            return "严重拥堵";
+        }
+    }
+    
+    /**
+     * 计算基于天气条件的推荐限速
+     * 根据恩施地区多雨多雾的特点
+     * @param weatherCondition 天气状况：晴、阴、小雨、中雨、大雨、雾等
+     * @param visibility 能见度，单位：米
+     * @return 推荐限速（公里/小时）
+     */
+    public Integer calculateWeatherAdjustedSpeedLimit(String weatherCondition, Integer visibility) {
+        // 获取道路的基本限速
+        Integer baseSpeedLimit = road.getSpeedLimit();
+        
+        if (baseSpeedLimit == null) {
+            return null;
+        }
+        
+        int adjustedLimit = baseSpeedLimit;
+        
+        // 根据天气状况调整限速
+        switch (weatherCondition) {
+            case "大雨":
+                adjustedLimit = (int)(baseSpeedLimit * 0.6);
+                break;
+            case "中雨":
+                adjustedLimit = (int)(baseSpeedLimit * 0.7);
+                break;
+            case "小雨":
+                adjustedLimit = (int)(baseSpeedLimit * 0.8);
+                break;
+            case "大雾":
+                adjustedLimit = (int)(baseSpeedLimit * 0.5);
+                break;
+            case "雾":
+                adjustedLimit = (int)(baseSpeedLimit * 0.7);
+                break;
+            case "雪":
+            case "冰雪":
+                adjustedLimit = (int)(baseSpeedLimit * 0.5);
+                break;
+        }
+        
+        // 根据能见度进一步调整限速
+        if (visibility != null) {
+            if (visibility < 50) {
+                adjustedLimit = 20; // 能见度极低时，限速20km/h
+            } else if (visibility < 100) {
+                adjustedLimit = Math.min(adjustedLimit, 30);
+            } else if (visibility < 200) {
+                adjustedLimit = Math.min(adjustedLimit, 40);
+            } else if (visibility < 500) {
+                adjustedLimit = Math.min(adjustedLimit, 60);
+            }
+        }
+        
+        // 根据路段特性进一步调整
+        // 陡坡路段
+        if (isSteepSlope()) {
+            adjustedLimit = (int)(adjustedLimit * 0.8);
+        }
+        
+        // 急弯路段
+        if (isSharpCurve()) {
+            adjustedLimit = (int)(adjustedLimit * 0.7);
+        }
+        
+        return adjustedLimit;
+    }
+    
+    /**
+     * 判断当前是否为该路段的高峰期
+     * @return 是否为高峰期
+     */
+    public boolean isCurrentlyPeakPeriod() {
+        LocalDateTime now = LocalDateTime.now();
+        int hour = now.getHour();
+        int minute = now.getMinute();
+        int dayOfWeek = now.getDayOfWeek().getValue(); // 1-7, Monday-Sunday
+        
+        // 检查所有高峰期规则
+        for (PeakPeriodRule rule : peakPeriodRules) {
+            if (rule.appliesTo(dayOfWeek, hour, minute)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * 计算路段的综合风险指数，综合考虑地质条件、坡度、曲率等因素
+     * @return 风险指数（0-10）
+     */
+    public Double calculateRiskIndex() {
+        double riskIndex = 0.0;
+        
+        // 坡度风险（最大40%）
+        if (maxSlope != null) {
+            if (maxSlope > 15.0) {
+                riskIndex += 4.0;
+            } else if (maxSlope > 10.0) {
+                riskIndex += 3.0;
+            } else if (maxSlope > 8.0) {
+                riskIndex += 2.0;
+            } else if (maxSlope > 5.0) {
+                riskIndex += 1.0;
+            }
+        } else if (averageSlope != null) {
+            if (averageSlope > 10.0) {
+                riskIndex += 3.0;
+            } else if (averageSlope > 8.0) {
+                riskIndex += 2.0;
+            } else if (averageSlope > 5.0) {
+                riskIndex += 1.0;
+            }
+        }
+        
+        // 曲率风险（最大30%）
+        if (averageCurvature != null) {
+            if (averageCurvature > 0.15) {
+                riskIndex += 3.0;
+            } else if (averageCurvature > 0.1) {
+                riskIndex += 2.0;
+            } else if (averageCurvature > 0.05) {
+                riskIndex += 1.0;
+            }
+        }
+        
+        // 地质风险（最大30%）
+        if (geologicalRisk != null && !geologicalRisk.isEmpty()) {
+            if (geologicalRisk.contains("滑坡") || geologicalRisk.contains("泥石流") || 
+                geologicalRisk.contains("高风险")) {
+                riskIndex += 3.0;
+            } else if (geologicalRisk.contains("中风险")) {
+                riskIndex += 2.0;
+            } else if (geologicalRisk.contains("低风险")) {
+                riskIndex += 1.0;
+            }
+        }
+        
+        return riskIndex;
+    }
+    
+    /**
+     * 根据风险指数更新路段风险等级
+     */
+    public void updateRiskLevel() {
+        Double riskIndex = calculateRiskIndex();
+        
+        if (riskIndex == null) {
+            this.riskLevel = "未知";
+            return;
+        }
+        
+        if (riskIndex >= 8.0) {
+            this.riskLevel = "极高风险";
+        } else if (riskIndex >= 6.0) {
+            this.riskLevel = "高风险";
+        } else if (riskIndex >= 4.0) {
+            this.riskLevel = "中风险";
+        } else if (riskIndex >= 2.0) {
+            this.riskLevel = "低风险";
+        } else {
+            this.riskLevel = "极低风险";
+        }
+    }
+    
+    /**
+     * 获取此路段过去24小时内的所有交通事件
+     * @return 交通事件列表
+     */
+    public List<TrafficEvent> getRecentTrafficEvents() {
+        LocalDateTime yesterday = LocalDateTime.now().minusDays(1);
+        
+        return trafficEvents.stream()
+            .filter(event -> event.getStartTime().isAfter(yesterday))
+            .sorted((e1, e2) -> e2.getStartTime().compareTo(e1.getStartTime())) // 按时间降序
+            .collect(Collectors.toList());
+    }
+    
+    /**
+     * 检查路段是否存在安全隐患
+     * @return 安全隐患描述，如果没有则返回null
+     */
+    public String getSafetyHazardDescription() {
+        StringBuilder hazards = new StringBuilder();
+        
+        // 检查坡度
+        if (maxSlope != null && maxSlope > 10.0) {
+            hazards.append("陡坡路段，坡度").append(maxSlope).append("%；");
+        }
+        
+        // 检查曲率
+        if (averageCurvature != null && averageCurvature > 0.1) {
+            hazards.append("急弯路段，平均曲率").append(averageCurvature).append("；");
+        }
+        
+        // 检查地质风险
+        if (geologicalRisk != null && !geologicalRisk.isEmpty()) {
+            hazards.append("地质风险：").append(geologicalRisk).append("；");
+        }
+        
+        // 检查路面状况
+        if ("较差".equals(surfaceCondition)) {
+            hazards.append("路面状况较差；");
+        }
+        
+        // 检查活跃交通事件
+        int activeEvents = getActiveTrafficEventCount();
+        if (activeEvents > 0) {
+            hazards.append("当前存在").append(activeEvents).append("起交通事件；");
+        }
+        
+        return hazards.length() > 0 ? hazards.toString() : null;
     }
 } 

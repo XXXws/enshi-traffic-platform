@@ -1,9 +1,7 @@
 package com.example.enshitrafficplatform.entity;
 
 import jakarta.persistence.*;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -12,6 +10,8 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * 天气记录实体类
@@ -21,7 +21,10 @@ import java.time.temporal.ChronoUnit;
 @Table(name = "weather_records", indexes = {
     @Index(name = "idx_weather_record_time", columnList = "record_time"),
     @Index(name = "idx_weather_condition", columnList = "weather_condition"),
-    @Index(name = "idx_weather_location", columnList = "longitude,latitude")
+    @Index(name = "idx_weather_location", columnList = "longitude,latitude"),
+    @Index(name = "idx_weather_region", columnList = "region_id"),
+    @Index(name = "idx_weather_visibility", columnList = "visibility"),
+    @Index(name = "idx_weather_precipitation", columnList = "precipitation")
 })
 @Data
 @Builder
@@ -40,6 +43,7 @@ public class WeatherRecord {
      * 记录时间
      */
     @NotNull(message = "记录时间不能为空")
+    @PastOrPresent(message = "记录时间不能是将来的时间")
     @Column(name = "record_time", nullable = false)
     private LocalDateTime recordTime;
 
@@ -54,18 +58,24 @@ public class WeatherRecord {
     /**
      * 温度（摄氏度）
      */
+    @DecimalMin(value = "-30.0", message = "温度不能低于-30摄氏度")
+    @DecimalMax(value = "50.0", message = "温度不能高于50摄氏度")
     @Column(name = "temperature")
     private Double temperature;
 
     /**
      * 湿度（%）
      */
+    @DecimalMin(value = "0.0", message = "湿度不能低于0%")
+    @DecimalMax(value = "100.0", message = "湿度不能高于100%")
     @Column(name = "humidity")
     private Double humidity;
 
     /**
      * 风向（度，0-360）
      */
+    @Min(value = 0, message = "风向不能小于0度")
+    @Max(value = 360, message = "风向不能大于360度")
     @Column(name = "wind_direction")
     private Integer windDirection;
 
@@ -79,30 +89,37 @@ public class WeatherRecord {
     /**
      * 风速（米/秒）
      */
+    @PositiveOrZero(message = "风速不能为负数")
     @Column(name = "wind_speed")
     private Double windSpeed;
 
     /**
      * 风力等级（0-17级）
      */
+    @Min(value = 0, message = "风力等级不能小于0级")
+    @Max(value = 17, message = "风力等级不能大于17级")
     @Column(name = "wind_force")
     private Integer windForce;
 
     /**
      * 气压（百帕）
      */
+    @DecimalMin(value = "800.0", message = "气压不能低于800百帕")
+    @DecimalMax(value = "1100.0", message = "气压不能高于1100百帕")
     @Column(name = "pressure")
     private Double pressure;
 
     /**
      * 降水量（毫米）
      */
+    @PositiveOrZero(message = "降水量不能为负数")
     @Column(name = "precipitation")
     private Double precipitation;
 
     /**
      * 能见度（米）
      */
+    @PositiveOrZero(message = "能见度不能为负数")
     @Column(name = "visibility")
     private Double visibility;
 
@@ -127,12 +144,15 @@ public class WeatherRecord {
     /**
      * 空气质量指数（AQI）
      */
+    @PositiveOrZero(message = "空气质量指数不能为负数")
     @Column(name = "aqi")
     private Integer aqi;
 
     /**
      * 云量（%，0-100）
      */
+    @Min(value = 0, message = "云量不能小于0%")
+    @Max(value = 100, message = "云量不能大于100%")
     @Column(name = "cloud_cover")
     private Integer cloudCover;
 
@@ -145,20 +165,25 @@ public class WeatherRecord {
     /**
      * 经度
      */
+    @DecimalMin(value = "108.0", message = "经度值必须大于或等于108.0")
+    @DecimalMax(value = "110.0", message = "经度值必须小于或等于110.0")
     @Column(name = "longitude")
     private Double longitude;
 
     /**
      * 纬度
      */
+    @DecimalMin(value = "29.0", message = "纬度值必须大于或等于29.0")
+    @DecimalMax(value = "31.0", message = "纬度值必须小于或等于31.0")
     @Column(name = "latitude")
     private Double latitude;
 
     /**
      * 数据来源
      */
+    @NotBlank(message = "数据来源不能为空")
     @Size(max = 100, message = "数据来源长度不能超过100个字符")
-    @Column(name = "data_source", length = 100)
+    @Column(name = "data_source", length = 100, nullable = false)
     private String dataSource;
 
     /**
@@ -759,5 +784,309 @@ public class WeatherRecord {
         } else {
             return "天气良好，适合驾驶";
         }
+    }
+
+    /**
+     * 判断是否为典型的恩施山区复杂天气
+     * 恩施地区多雨多雾，地形复杂，常出现低云、大雾、连续降雨等复杂天气状况
+     * @return 是否为山区复杂天气
+     */
+    public boolean isEnshiComplexWeather() {
+        // 大雾天气
+        boolean isFogWeather = "大雾".equals(weatherCondition) || 
+            "雾".equals(weatherCondition) || 
+            isFoggy || 
+            (visibility != null && visibility < 300);
+        
+        // 暴雨天气
+        boolean isHeavyRainWeather = "暴雨".equals(weatherCondition) || 
+            "大暴雨".equals(weatherCondition) || 
+            "特大暴雨".equals(weatherCondition) || 
+            (precipitation != null && precipitation > 30.0);
+        
+        // 低云低压天气
+        boolean isLowCloudPressure = (cloudCover != null && cloudCover > 80) && 
+            (pressure != null && pressure < 950.0);
+        
+        // 雷暴天气
+        boolean isThunderstorm = hasThunderstorm || "雷暴".equals(weatherCondition);
+        
+        // 冰雪天气
+        boolean isSnowOrIce = isSnowIce || "雪".equals(weatherCondition) || 
+            "冰雹".equals(weatherCondition);
+        
+        // 判定为复杂天气的条件：满足其中一项严重条件，或同时满足两项一般条件
+        return isHeavyRainWeather || isThunderstorm || isSnowOrIce || 
+               (isFogWeather && isLowCloudPressure);
+    }
+    
+    /**
+     * 计算恩施地区山区天气交通影响指数
+     * 专门针对恩施山区的天气对交通的影响进行评估
+     * @return 交通影响指数（0-10，0表示无影响，10表示极端影响）
+     */
+    public double calculateEnshiWeatherImpactIndex() {
+        double impactIndex = 0.0;
+        
+        // 基础影响分值 - 降水
+        if (precipitation != null) {
+            if (precipitation == 0) {
+                // 无雨
+                impactIndex += 0;
+            } else if (precipitation < 5) {
+                // 小雨
+                impactIndex += 2.0;
+            } else if (precipitation < 15) {
+                // 中雨
+                impactIndex += 4.0;
+            } else if (precipitation < 30) {
+                // 大雨
+                impactIndex += 6.0;
+            } else if (precipitation < 50) {
+                // 暴雨
+                impactIndex += 8.0;
+            } else {
+                // 大暴雨或特大暴雨
+                impactIndex += 10.0;
+            }
+        }
+        
+        // 能见度影响
+        if (visibility != null) {
+            if (visibility > 1000) {
+                // 能见度良好
+                // 不增加额外影响
+            } else if (visibility > 500) {
+                // 能见度一般
+                impactIndex += 1.0;
+            } else if (visibility > 200) {
+                // 能见度较差
+                impactIndex += 2.5;
+            } else if (visibility > 100) {
+                // 能见度很差
+                impactIndex += 4.0;
+            } else {
+                // 能见度极差
+                impactIndex += 5.0;
+            }
+        }
+        
+        // 雾气影响
+        if (isFoggy) {
+            impactIndex += 3.0;
+        }
+        
+        // 冰雪影响（恩施地区冬季偶有结冰和降雪）
+        if (isSnowIce) {
+            impactIndex += 5.0;
+        }
+        
+        // 风力影响
+        if (windForce != null) {
+            if (windForce >= 8) {
+                // 大风影响
+                impactIndex += 3.0;
+            } else if (windForce >= 6) {
+                // 中等风力
+                impactIndex += 1.5;
+            }
+        }
+        
+        // 温度影响（主要考虑低温结冰风险）
+        if (temperature != null) {
+            if (temperature < 0) {
+                // 低温结冰风险
+                impactIndex += 2.0;
+                
+                // 降水+低温组合，额外增加影响
+                if (precipitation != null && precipitation > 0) {
+                    impactIndex += 3.0;
+                }
+            } else if (temperature < 3) {
+                // 接近冰点
+                impactIndex += 1.0;
+            }
+        }
+        
+        // 极端天气警告
+        if (warningInfo != null && !warningInfo.isEmpty()) {
+            impactIndex += 2.0;
+        }
+        
+        // 雷暴天气
+        if (hasThunderstorm) {
+            impactIndex += 2.0;
+        }
+        
+        // 限制最大值为10
+        return Math.min(10.0, impactIndex);
+    }
+    
+    /**
+     * 获取恩施地区山路天气安全驾驶建议
+     * 根据当前天气状况，提供针对恩施山区道路的安全驾驶建议
+     * @return 安全驾驶建议
+     */
+    public String getEnshiMountainDrivingAdvice() {
+        double impactIndex = calculateEnshiWeatherImpactIndex();
+        StringBuilder advice = new StringBuilder("恩施山区驾车建议：");
+        
+        // 基于天气影响指数提供不同级别的建议
+        if (impactIndex >= 8.0) {
+            advice.append("当前为极端恶劣天气，建议取消不必要出行，若必须行驶，需保持极低速度，打开雾灯和危险警示灯，与前车保持足够安全距离。");
+        } else if (impactIndex >= 6.0) {
+            advice.append("当前为严重恶劣天气，建议减少出行，山路行驶务必减速50%以上，开启雾灯，谨慎驾驶，避免急转弯和紧急制动。");
+        } else if (impactIndex >= 4.0) {
+            advice.append("当前为中度恶劣天气，建议在山区道路减速30%以上，开启雾灯，保持安全距离，注意路面湿滑。");
+        } else if (impactIndex >= 2.0) {
+            advice.append("当前为轻度恶劣天气，建议适当减速，开启雾灯，增加跟车距离，注意观察路况变化。");
+        } else {
+            advice.append("当前天气对交通影响较小，正常驾驶即可，但仍需注意山区道路的急转弯和坡度变化。");
+        }
+        
+        // 针对特定天气类型的附加建议
+        if (isFoggy || (visibility != null && visibility < 200)) {
+            advice.append(" 当前雾气较大，视线受限，开启雾灯和危险警示灯，行驶缓慢，避免超车，遇极浓雾考虑临时停靠安全地带等待。");
+        }
+        
+        if (precipitation != null && precipitation > 30) {
+            advice.append(" 当前降雨量极大，注意山区道路泥石流和山洪风险，避开低洼和山沟区域，不要冒险通过水淹路段。");
+        } else if (precipitation != null && precipitation > 15) {
+            advice.append(" 当前降雨较大，山区道路可能出现积水或小型滑坡，谨慎驾驶，避开已有积水区域。");
+        }
+        
+        if (isSnowIce || (temperature != null && temperature < 0)) {
+            advice.append(" 道路可能结冰，尤其在桥面和山区阴面路段，车速不宜超过30km/h，避免急加速、急转弯和急刹车。");
+        }
+        
+        return advice.toString();
+    }
+    
+    /**
+     * 计算恩施地区多雨多雾天气下的路面湿滑指数
+     * @return 路面湿滑指数（0-5，0表示干燥，5表示极度湿滑）
+     */
+    public int calculateRoadSlipperyIndex() {
+        int slipperyIndex = 0;
+        
+        // 降水的影响
+        if (precipitation != null) {
+            if (precipitation > 30) {
+                slipperyIndex += 3;
+            } else if (precipitation > 15) {
+                slipperyIndex += 2;
+            } else if (precipitation > 5) {
+                slipperyIndex += 1;
+            }
+        }
+        
+        // 湿度的影响（恩施地区湿度普遍较高）
+        if (humidity != null) {
+            if (humidity > 95) {
+                slipperyIndex += 2;
+            } else if (humidity > 85) {
+                slipperyIndex += 1;
+            }
+        }
+        
+        // 温度的影响（低温结冰风险）
+        if (temperature != null) {
+            if (temperature < 0) {
+                slipperyIndex += 3;  // 结冰风险极高
+            } else if (temperature < 4) {
+                slipperyIndex += 2;  // 可能结冰
+            }
+        }
+        
+        // 雾的影响
+        if (isFoggy) {
+            slipperyIndex += 1;  // 浓雾会增加路面湿度
+        }
+        
+        // 限制最大值为5
+        return Math.min(5, slipperyIndex);
+    }
+    
+    /**
+     * 判断是否存在山体滑坡风险（针对恩施地区多为山地的特点）
+     * @return 滑坡风险等级：无风险、低风险、中风险、高风险、极高风险
+     */
+    public String evaluateLandslideRisk() {
+        // 无降雨时，滑坡风险较低
+        if (precipitation == null || precipitation == 0) {
+            return "无风险";
+        }
+        
+        // 基于降雨量评估初始风险
+        String riskLevel;
+        if (precipitation > 100) {
+            riskLevel = "极高风险";
+        } else if (precipitation > 50) {
+            riskLevel = "高风险";
+        } else if (precipitation > 30) {
+            riskLevel = "中风险";
+        } else if (precipitation > 15) {
+            riskLevel = "低风险";
+        } else {
+            riskLevel = "无风险";
+        }
+        
+        // 连续降雨会显著增加滑坡风险
+        // 此处仅做示例，实际应用中需要分析历史降雨数据
+        if (weatherCondition.contains("连续") || weatherCondition.contains("持续")) {
+            // 风险上升一级
+            if ("低风险".equals(riskLevel)) {
+                riskLevel = "中风险";
+            } else if ("中风险".equals(riskLevel)) {
+                riskLevel = "高风险";
+            } else if ("高风险".equals(riskLevel)) {
+                riskLevel = "极高风险";
+            }
+        }
+        
+        return riskLevel;
+    }
+    
+    /**
+     * 获取天气对恩施各类道路的影响等级
+     * @return 天气影响等级Map，键为道路类型，值为影响等级（0-5）
+     */
+    public Map<String, Integer> getWeatherImpactByRoadType() {
+        Map<String, Integer> impactMap = new HashMap<>();
+        double baseImpact = calculateEnshiWeatherImpactIndex() / 2.0;  // 基础影响值（0-5）
+        
+        // 国道（相对较宽，排水系统较好）
+        impactMap.put("国道", (int)Math.min(5, baseImpact * 0.8));
+        
+        // 省道（中等宽度，排水系统一般）
+        impactMap.put("省道", (int)Math.min(5, baseImpact * 1.0));
+        
+        // 县道（较窄，排水系统较差）
+        impactMap.put("县道", (int)Math.min(5, baseImpact * 1.2));
+        
+        // 乡村道路（很窄，多为砂石路面，排水系统很差）
+        impactMap.put("乡道", (int)Math.min(5, baseImpact * 1.5));
+        
+        // 山区盘山公路（急弯多，坡度大，视线受限）
+        impactMap.put("山区道路", (int)Math.min(5, baseImpact * 1.8));
+        
+        // 桥梁（更易结冰，风力影响更大）
+        int bridgeImpact = (int)Math.min(5, baseImpact * 1.3);
+        if (temperature != null && temperature < 0) {
+            bridgeImpact += 1;  // 低温时桥面更容易结冰
+        }
+        if (windForce != null && windForce >= 6) {
+            bridgeImpact += 1;  // 大风对桥梁影响更大
+        }
+        impactMap.put("桥梁", Math.min(5, bridgeImpact));
+        
+        // 隧道（光线突变，湿滑）
+        int tunnelImpact = (int)Math.min(5, baseImpact * 0.9);
+        if (humidity != null && humidity > 90) {
+            tunnelImpact += 1;  // 高湿度使隧道更湿滑
+        }
+        impactMap.put("隧道", Math.min(5, tunnelImpact));
+        
+        return impactMap;
     }
 } 

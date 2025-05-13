@@ -10,7 +10,9 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 道路实体类
@@ -217,5 +219,152 @@ public class Road {
      */
     public int getMonitoringPointCount() {
         return getAllMonitoringPoints().size();
+    }
+    
+    /**
+     * 计算道路的平均坡度风险等级
+     * 根据恩施市山区公路标准进行评估
+     * @return 风险等级：低、中、高、极高
+     */
+    public String calculateSlopeRiskLevel() {
+        if (averageSlope == null) {
+            return "未知";
+        }
+        
+        if (averageSlope > 10.0) {
+            return "极高";
+        } else if (averageSlope > 8.0) {
+            return "高";
+        } else if (averageSlope > 5.0) {
+            return "中";
+        } else {
+            return "低";
+        }
+    }
+    
+    /**
+     * 计算道路的平均曲率风险等级
+     * 根据恩施市山区公路标准进行评估
+     * @return 风险等级：低、中、高、极高
+     */
+    public String calculateCurvatureRiskLevel() {
+        if (averageCurvature == null) {
+            return "未知";
+        }
+        
+        if (averageCurvature > 0.15) {
+            return "极高";
+        } else if (averageCurvature > 0.1) {
+            return "高";
+        } else if (averageCurvature > 0.05) {
+            return "中";
+        } else {
+            return "低";
+        }
+    }
+    
+    /**
+     * 获取道路的综合风险指数
+     * 综合考虑坡度、曲率、路面状况等因素
+     * @return 风险指数（0-10）
+     */
+    public Double calculateRiskIndex() {
+        if (averageSlope == null || averageCurvature == null) {
+            return null;
+        }
+        
+        // 基础风险分
+        double riskIndex = 0.0;
+        
+        // 坡度风险（占40%）
+        if (averageSlope > 10.0) {
+            riskIndex += 4.0;
+        } else if (averageSlope > 8.0) {
+            riskIndex += 3.0;
+        } else if (averageSlope > 5.0) {
+            riskIndex += 2.0;
+        } else if (averageSlope > 3.0) {
+            riskIndex += 1.0;
+        }
+        
+        // 曲率风险（占40%）
+        if (averageCurvature > 0.15) {
+            riskIndex += 4.0;
+        } else if (averageCurvature > 0.1) {
+            riskIndex += 3.0;
+        } else if (averageCurvature > 0.05) {
+            riskIndex += 2.0;
+        } else if (averageCurvature > 0.02) {
+            riskIndex += 1.0;
+        }
+        
+        // 路面状况风险（占20%）
+        if ("较差".equals(surfaceMaterial)) {
+            riskIndex += 2.0;
+        } else if ("一般".equals(surfaceMaterial)) {
+            riskIndex += 1.0;
+        }
+        
+        return riskIndex;
+    }
+    
+    /**
+     * 获取在雨雾天气下的建议限速
+     * 根据恩施地区多雨多雾的特点，计算恶劣天气下的安全车速
+     * @return 建议限速（公里/小时）
+     */
+    public Integer getWeatherAdjustedSpeedLimit(String weatherCondition) {
+        if (speedLimit == null) {
+            return null;
+        }
+        
+        int adjustedLimit = speedLimit;
+        
+        // 根据天气状况调整限速
+        switch (weatherCondition) {
+            case "大雨":
+                adjustedLimit = (int)(speedLimit * 0.6);
+                break;
+            case "中雨":
+                adjustedLimit = (int)(speedLimit * 0.7);
+                break;
+            case "小雨":
+                adjustedLimit = (int)(speedLimit * 0.8);
+                break;
+            case "大雾":
+                adjustedLimit = (int)(speedLimit * 0.5);
+                break;
+            case "雾":
+                adjustedLimit = (int)(speedLimit * 0.7);
+                break;
+            case "雪":
+            case "冰雪":
+                adjustedLimit = (int)(speedLimit * 0.5);
+                break;
+        }
+        
+        // 山区道路在恶劣天气下进一步降低限速
+        if (isMountainRoad()) {
+            adjustedLimit = (int)(adjustedLimit * 0.8);
+        }
+        
+        return adjustedLimit;
+    }
+    
+    /**
+     * 获取道路的当前拥堵路段列表
+     * @return 拥堵路段列表
+     */
+    public List<RoadSection> getCongestedSections() {
+        if (roadSections == null || roadSections.isEmpty()) {
+            return List.of();
+        }
+        
+        return roadSections.stream()
+                .filter(section -> {
+                    Double congestionIndex = section.getCurrentCongestionIndex();
+                    return congestionIndex != null && congestionIndex > 6.0;
+                })
+                .collect(Collectors.toList());
     }
 } 
