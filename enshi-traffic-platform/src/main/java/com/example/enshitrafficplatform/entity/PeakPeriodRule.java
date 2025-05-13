@@ -467,4 +467,36 @@ public class PeakPeriodRule {
         
         return totalMinutes;
     }
+
+    /**
+     * 判断指定星期几、小时和分钟是否在高峰期规则内
+     * @param dayOfWeek 星期几（1-7，1表示周一）
+     * @param hour 小时（0-23）
+     * @param minute 分钟（0-59）
+     * @return 是否符合规则
+     */
+    public boolean appliesTo(int dayOfWeek, int hour, int minute) {
+        if (startTime == null || endTime == null) {
+            return false;
+        }
+        
+        // 检查星期是否适用
+        if (applicableDays != null) {
+            int dayBit = 1 << (dayOfWeek - 1);
+            if ((applicableDays & dayBit) == 0) {
+                return false;
+            }
+        }
+        
+        // 检查时间是否在范围内
+        LocalTime time = LocalTime.of(hour, minute);
+        
+        // 如果结束时间小于开始时间，表示跨天
+        if (endTime.isBefore(startTime)) {
+            return time.isAfter(startTime) || time.equals(startTime) || time.isBefore(endTime);
+        } else {
+            return (time.isAfter(startTime) || time.equals(startTime)) && 
+                   (time.isBefore(endTime) || time.equals(endTime));
+        }
+    }
 } 
